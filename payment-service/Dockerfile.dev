@@ -1,0 +1,38 @@
+###
+FROM eclipse-temurin:21-jdk-jammy as builder
+
+# Set the working directory inside the container
+WORKDIR /opt/app
+
+# Copy Maven wrapper files
+COPY .mvn/ .mvn
+
+# Copy Maven wrapper script and the project's POM file
+COPY mvnw ./
+COPY payment-service/parent.pom.xml ./pom.xml
+
+# project parent copy
+COPY outbox/pom.xml ./outbox/pom.xml
+COPY payment-service/pom.xml ./payment-service/pom.xml
+
+# Download dependencies using Maven wrapper
+RUN ./mvnw dependency:go-offline
+
+# Copy the application source code
+COPY outbox/src/main ./outbox/src/main
+COPY payment-service/src/main ./payment-service/src/main
+# Build the application
+RUN ./mvnw clean install
+
+# Switch to a new stage with the JRE-only base image
+FROM eclipse-temurin:21-jre-jammy
+
+# Set the working directory inside the container
+WORKDIR /opt/app
+
+# Expose the default Spring Boot port
+# Copy the JAR file from the builder stage
+COPY --from=builder /opt/app/payment-service/target/*.jar /opt/app/*.jar
+
+# Define the entry point to run the application
+ENTRYPOINT ["java", "-jar", "/opt/app/*.jar"]
