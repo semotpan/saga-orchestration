@@ -7,12 +7,11 @@ import io.example.reservation.messaging.PaymentEvent;
 import io.example.reservation.messaging.PaymentStatus;
 import io.example.reservation.messaging.RoomBookingEvent;
 import io.example.reservation.messaging.RoomBookingStatus;
-import io.example.reservation.web.ReservationController.StatusResource;
+import io.example.reservation.web.ReservationController.ReservationResource;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeader;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -23,12 +22,16 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.testcontainers.shaded.org.awaitility.Awaitility;
 
 import java.io.IOException;
+import java.net.URI;
+import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 import static java.util.UUID.randomUUID;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 
@@ -51,7 +54,7 @@ public class BookRoomE2ETest extends TestContainersSetup {
         var resp = restTemplate.postForEntity("/v1/reservations", new HttpEntity<>(requestJSON(), headers), String.class);
 
         // 2. ensure mocking of hotel service
-        String sagaId = null; // message key for saga
+        String sagaId; // message key for saga
         try (var consumer = kafkaConsumer()) {
             consumer.subscribe(List.of("room-booking.inbox.events"));
             var changeEvent = drain(consumer, 1).get(0);
@@ -84,9 +87,34 @@ public class BookRoomE2ETest extends TestContainersSetup {
         }
 
         //4. check the reservation
-        var reservationStatus = restTemplate.getForEntity(resp.getHeaders().getLocation(), StatusResource.class);
-        assertThat(reservationStatus.getBody())
-                .isEqualTo(new StatusResource(Reservation.Status.SUCCEED));
+        var reservationId = reservationIdFromLocationHeader(Objects.requireNonNull(resp.getHeaders().getLocation()));
+        var expected = expected(reservationId);
+
+        Awaitility.await()
+                .atLeast(Duration.ofMillis(500))
+                .atMost(Duration.ofSeconds(10))
+                .with()
+                .pollInterval(Duration.ofMillis(500))
+                .until(() -> {
+                    var reservation = restTemplate.getForEntity(resp.getHeaders().getLocation(), ReservationResource.class);
+                    return expected.equals(reservation.getBody());
+                });
+    }
+
+    private ReservationResource expected(UUID reservationId) {
+        return ReservationResource.builder()
+                .reservationId(reservationId)
+                .hotelId(1L)
+                .roomId(1L)
+                .guestId(10000001L)
+                .status(Reservation.Status.SUCCEED)
+                .build();
+    }
+
+    private UUID reservationIdFromLocationHeader(URI location) {
+        var path = location.getPath();
+        var lastIndex = path.lastIndexOf('/') + 1;
+        return UUID.fromString(path.substring(lastIndex));
     }
 
     private void enrichHeaders(Headers record, String eventType, String aggregateType) {
@@ -95,7 +123,6 @@ public class BookRoomE2ETest extends TestContainersSetup {
                 .add(new RecordHeader("aggregateType", aggregateType.getBytes()));
     }
 
-    @NotNull
     private String requestJSON() {
         return """
                 {
