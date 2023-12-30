@@ -27,7 +27,10 @@ Use the [**SAGA Orchestration Pattern**](https://microservices.io/post/sagas/201
 The reservation process is as follows:
 ![Reservation State](assets/reservation-state.png)
 
-A detailed components workflow:
+The SAGA framework state machine happy path:
+![SagaStateMachine](assets/saga-state-machine.png)
+
+A detailed component workflow:
 ![Use Case Overview](assets/use-case-overview.png)
 
 A happy path for making a reservation is illustrated in the following _sequence diagram_:
